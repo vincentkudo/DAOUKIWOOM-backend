@@ -120,54 +120,29 @@ Mỗi phòng còn gắn trạng thái khung giờ: `AVAILABLE`, `HELD_BY_ME`, `H
 
 ## Quyết định quan trọng và lý do
 
+Chỉ những quyết định gắn đề bài: đề xuất phòng theo sức chứa, giữ chỗ Redis, không trùng lịch, toàn vẹn dữ liệu đặt phòng.
+
 **1. Tìm theo số người, không theo phòng**  
-Chọn: `GET /rooms/suggestions?attendeeCount=` rồi mới lọc phòng.  
-Không chọn: UI chọn một phòng rồi hỏi còn trống không.  
-Lý do: nhu cầu thật là “6 người họp 9h–10h, phòng nào vừa và còn trống”. Nếu đi từ phòng, người dùng phải thử từng mã. Sắp xếp theo chỗ dư tăng dần để ưu tiên phòng vừa, tránh chiếm All-hands 16 cho 3 người.
+Chọn: `GET /rooms/suggestions?attendeeCount=` rồi mới lọc phòng còn trống và đủ chỗ.  
+Lý do: đề bài là gợi ý phòng theo sức chứa. Nhu cầu là “6 người họp 9h cần phòng nào”, không phải lần lượt thử từng mã phòng. Xếp phòng ít dư chỗ lên trước để 3 người không chiếm phòng 16 chỗ.
 
-**2. Redis giữ chỗ mềm 90 giây, không dùng hàng đợi**  
-Chọn: `SET` Redis TTL 90s khi bấm đặt, heartbeat ~30s, hủy form thì `DELETE`, đặt xong thì consume. Một user chỉ giữ một phòng.  
-Không chọn: Kafka / outbox.  
-Lý do: hai người có thể mở cùng phòng trước khi ai bấm xác nhận. Nếu chỉ chặn lúc `POST /bookings` thì người sau vẫn điền form rồi mới thấy lỗi. Hold báo ngay “đang được người khác giữ, còn Xs”. TTL tự hết nếu đóng tab. Kafka thừa: không có consumer khác, không cần replay sự kiện, chỉ cần state ngắn sống.
+**2. Redis giữ chỗ mềm 90 giây**  
+Chọn: khi bấm đặt thì `SET` Redis TTL 90s; form còn mở thì heartbeat; hủy hoặc hết giờ thì nhả; đặt xong thì xóa hold.  
+Lý do: đề bài yêu cầu soft-hold. Hai người có thể mở cùng phòng trước khi ai xác nhận. Chỉ chặn lúc ghi booking thì người sau vẫn điền form rồi mới lỗi. Hold báo ngay phòng đang bị giữ và còn bao nhiêu giây.
 
-**3. PostgreSQL `EXCLUDE gist` là lớp cuối chống trùng giờ**  
-Chọn: `tstzrange(start_at, end_at, '[)')` + `WHERE status = CONFIRMED`, kèm `SELECT … FOR UPDATE`.  
-Lý do: Redis có thể restart, hold có thể hết, hai request vẫn có thể tới `INSERT` cùng lúc. Constraint DB không phụ thuộc app — request thứ hai fail, không bao giờ có hai lịch CONFIRMED chồng nhau.  
-Khoảng nửa mở `[start, end)` vì họp 09:00–10:00 và 10:00–11:00 không chồng, phòng dùng liền được. Chỉ `CONFIRMED` nằm trong constraint để lịch `CANCELLED` trả phòng.
+**3. DB chặn hai lịch CONFIRMED chồng giờ**  
+Chọn: `EXCLUDE gist` trên khoảng `[start_at, end_at)`, chỉ với `CONFIRMED`, kèm khóa dòng phòng lúc insert.  
+Lý do: đề bài không cho hai cuộc họp cùng phòng cùng giờ. Redis có thể mất; hai request vẫn có thể insert cùng lúc. Constraint trên PostgreSQL là lớp cuối.  
+Khoảng nửa mở `[start, end)` để 09:00–10:00 và 10:00–11:00 không đụng nhau — họp liền kề vẫn được.
 
-**4. Không sửa / xóa phòng khi còn lịch CONFIRMED chưa hết**  
-Chọn: `locked` khi `end_at > now()`, API `3010`. Admin xem được, không sửa sức chứa / xóa.  
-Lý do: booking đã xác nhận “6 người / phòng 6 chỗ”. Sửa xuống 5 chỗ thì dữ liệu tự mâu thuẫn. Xóa phòng thì mất khóa ngoại lịch sử. Chặn ở service, không tin UI.
+**4. Không sửa sức chứa / xóa phòng khi còn lịch họp**  
+Chọn: phòng có booking `CONFIRMED` mà `end_at > now` thì chỉ xem, không sửa, không xóa.  
+Lý do: lịch đã chốt 6 người trên phòng 6 chỗ. Đổi xuống 5 chỗ thì booking không còn đúng sức chứa. Đó là mất toàn vẹn dữ liệu đặt phòng.
 
-**5. Flyway giữ schema, Hibernate chỉ `validate`**  
-Chọn: `V1__init.sql` là nguồn thật. `ddl-auto: validate`.  
-Không chọn: Hibernate tự `update` cột.  
-Lý do: `update` làm lệch local / Docker / prod (đã gặp `SMALLINT` vs `INTEGER` với `floor`). Flyway chạy cùng một file ở mọi môi trường, app từ chối khởi động nếu lệch.
+**5. Luật giờ họp: 07:00–21:00, mốc 15 phút, cùng ngày**  
+Chọn: timezone `Asia/Ho_Chi_Minh`, tối thiểu 15 phút, tối đa 8 giờ, đặt trước tối đa 30 ngày.  
+Lý do: tự thiết kế luật nghiệp vụ cho văn phòng. Slot 15 phút khớp lịch họp. Giới hạn giờ và ngày để không chiếm phòng ngoài giờ làm hoặc cả tháng.
 
-**6. JWT stateless, hai role ADMIN / EMPLOYEE**  
-Chọn: Bearer JWT, không session server.  
-Lý do: API đứng sau nginx / nhiều instance. Session dính máy. Nhân viên chỉ đặt và xem lịch mình. Admin thêm CRUD phòng. Ít role cho đúng take-home, không làm IAM phức tạp.
-
-**7. Múi giờ `Asia/Ho_Chi_Minh`, slot 15 phút, giờ 07:00–21:00**  
-Chọn: lưu `TIMESTAMPTZ`, luật theo VN. Slot 15 phút. Tối đa 8 giờ, trước 30 ngày.  
-Lý do: văn phòng VN, UTC thuần dễ lệch ngày. 15 phút khớp lịch thật, tránh 09:07–09:22. 07:00–21:00 là giờ tòa nhà. Giới hạn 30 ngày và 8 giờ để không chiếm phòng cả tháng / cả ngày.
-
-**8. Hủy mềm, không xóa dòng booking**  
-Chọn: `status = CANCELLED`, giữ `cancel_reason`.  
-Lý do: cần biết ai hủy, lúc nào. Xóa cứng mất audit. Constraint overlap chỉ áp `CONFIRMED` nên hủy là phòng trống lại ngay, không cần job dọn.
-
-**9. Response bọc `APIResponse { code, message, httpStatus, result }`**  
-Chọn: `code = 1000` thành công; lỗi có mã nghiệp vụ (3006 hold, 3010 phòng đang họp).  
-Lý do: frontend phân nhánh theo `code`, không parse chuỗi tiếng Anh của Bean Validation. HTTP status vẫn đúng cho Swagger / proxy.
-
-**10. Seed chỉ khi DB trống**  
-Chọn: `SEED_ENABLED`, tạo admin / nhân viên / dải phòng 3–30 chỗ một lần.  
-Lý do: reviewer chạy `docker compose up` là có data. Seed lại mỗi lần restart sẽ đè booking demo. `docker compose down -v` khi cần reset.
-
-**11. Docker Compose đủ postgres + redis + api**  
-Chọn: một lệnh chạy cả stack.  
-Lý do: reviewer không cần cài JDK / Maven / Postgres. Cùng image với cách nộp.
-
-**12. MapStruct cho DTO, không trả Entity ra API**  
-Chọn: Entity ở persistence; DTO ở controller.  
-Lý do: không lộ `password_hash`, không kéo lazy `organizer` ra JSON. Đổi cột DB không phá contract nếu mapper giữ field cũ.
+**6. Hủy lịch thì trả phòng, không xóa dòng**  
+Chọn: đổi `CANCELLED`; constraint overlap không tính lịch hủy.  
+Lý do: phòng phải trống lại cho người khác đặt. Xóa dòng thì mất dấu vết ai đã hủy cuộc họp đó.
