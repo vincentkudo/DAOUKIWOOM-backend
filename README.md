@@ -27,8 +27,8 @@ Luồng: chọn sĩ số + giờ → hệ thống xếp phòng vừa nhất còn
 ### Ai được làm gì
 
 - Nhân viên: tìm phòng, giữ chỗ, đặt, xem / hủy lịch của mình.
-- Quản trị: thêm các việc trên, cộng quản lý phòng.
-- Chỉ người tạo lịch (hoặc admin) mới sửa / hủy.
+- Quản trị: làm được các việc trên, cộng quản lý phòng, **sửa / hủy lịch của người khác**.
+- Nhân viên chỉ sửa / hủy lịch mình tạo.
 - Không sửa hoặc hủy lịch đã bắt đầu.
 
 ### Đề xuất phòng
@@ -51,7 +51,7 @@ Bấm đặt là giữ phòng 90 giây trên Redis. Người khác thấy phòng
 
 ### Luật một lịch họp
 
-- Trong 07:00–21:00, theo giờ Việt Nam, cùng một ngày.
+- Trong 07:00–21:00, theo giờ Việt Nam, cùng một ngày. **Thứ 7 và chủ nhật vẫn đặt được.**
 - Bắt đầu / kết thúc khớp mốc 15 phút (09:00 được, 09:07 không).
 - Dài từ 15 phút đến 8 giờ; không đặt quá khứ; không đặt trước quá 30 ngày.
 - Số người không vượt sức chứa. Phòng ngưng dùng không đặt được.
@@ -60,7 +60,7 @@ Bấm đặt là giữ phòng 90 giây trên Redis. Người khác thấy phòng
 
 ### Phòng và toàn vẹn dữ liệu
 
-Phòng còn lịch `CONFIRMED` chưa kết thúc thì không sửa sức chứa và không xóa. Ví dụ đã chốt 6 người / 6 chỗ rồi hạ xuống 5 chỗ là sai dữ liệu.
+Khóa phòng khi còn **lịch `CONFIRMED` chưa kết thúc** — gồm đang họp **và lịch tương lai**, không chỉ lúc đang họp. Không sửa sức chứa, không xóa. Ví dụ đã chốt 6 người / 6 chỗ rồi hạ xuống 5 chỗ là sai dữ liệu.
 
 ## Quyết định và lý do
 
@@ -70,8 +70,12 @@ Phòng còn lịch `CONFIRMED` chưa kết thúc thì không sửa sức chứa 
 
 **DB cấm hai lịch xác nhận chồng giờ.** Redis có thể mất; hai request vẫn có thể ghi cùng lúc. Constraint PostgreSQL là lớp cuối. Khoảng `[start, end)` để họp liền kề vẫn được.
 
-**Khóa sửa phòng khi còn họp.** Đổi 6 chỗ → 5 chỗ lúc đã có booking 6 người làm hỏng lịch đã chốt.
+**Khóa phòng khi còn lịch tương lai, không chỉ lúc đang họp.** Booking tuần sau vẫn gắn sức chứa đã chốt. Đổi 6 → 5 chỗ lúc đó cũng sai dữ liệu.
 
-**Giờ làm + mốc 15 phút.** Luật văn phòng tự đặt: trong giờ tòa nhà, khớp lịch họp, không chiếm phòng cả ngày / cả tháng.
+**Thứ 7 / CN vẫn đặt được.** Lịch đủ 7 ngày; ngoài giờ 07:00–21:00 mới cấm, không cấm cuối tuần.
+
+**Admin sửa / hủy lịch người khác.** Nhân viên chỉ đụng lịch mình. Admin xử lý nhầm lịch / trả phòng giúp.
+
+**Giờ làm + mốc 15 phút.** Trong giờ tòa nhà, khớp lịch họp, không chiếm phòng cả ngày / cả tháng.
 
 **Hủy thì trả phòng, không xóa dòng.** Người khác đặt được ngay; vẫn biết ai đã hủy cuộc họp đó.
