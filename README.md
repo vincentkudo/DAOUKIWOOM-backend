@@ -1,11 +1,8 @@
 # RoomFlow Backend
 
-REST API đặt phòng họp cho DAOU KIWOOM.
+API đặt phòng họp DAOU KIWOOM. Nhân viên nhập số người và khung giờ; hệ thống đề xuất phòng còn trống, vừa sức chứa. Ai giữ hoặc đặt trước thì giữ phòng.
 
-Nhân viên nhập **số người trước**, hệ thống đề xuất phòng còn trống và vừa sức chứa. Ai giữ/đặt trước thì giữ phòng.
-
-- Java 17 · Spring Boot 3 · PostgreSQL 16 · Redis 7 · Flyway
-- JWT · Lombok · MapStruct
+Java 17 · Spring Boot 3 · PostgreSQL · Redis
 
 ## Chạy
 
@@ -15,134 +12,66 @@ Cần Docker Desktop.
 docker compose up --build
 ```
 
-| Cổng | Dịch vụ |
-| --- | --- |
-| http://localhost:8080 | API |
-| http://localhost:8080/swagger-ui.html | Swagger |
-| http://localhost | UI (nếu compose có frontend) |
-| 5432 | PostgreSQL |
-| 6379 | Redis |
-
-Tài khoản seed (chỉ tạo khi DB trống):
+- API: http://localhost:8080
+- Swagger: http://localhost:8080/swagger-ui.html
 
 | Role | Email | Mật khẩu |
 | --- | --- | --- |
 | ADMIN | `admin@daoukiwoom.vn` | `Admin123!` |
 | EMPLOYEE | `linh.tran@daoukiwoom.vn` | `Emp123!` |
 
-Đăng nhập:
+## Nghiệp vụ
 
-```http
-POST /api/v1/auth/login
-{ "email": "linh.tran@daoukiwoom.vn", "password": "Emp123!" }
-```
+Luồng: chọn sĩ số + giờ → hệ thống xếp phòng vừa nhất còn trống → giữ chỗ 90s → xác nhận → lịch `CONFIRMED`. Hai lịch xác nhận không được chồng giờ trên cùng phòng.
 
-Gọi API kèm `Authorization: Bearer <accessToken>`.
+### Ai được làm gì
 
-Biến môi trường: copy `.env.example` → `.env`. Quan trọng khi deploy: `JWT_SECRET`, `DB_*`, `REDIS_PASSWORD`, `CORS_ORIGINS`. TTL giữ chỗ: `ROOM_HOLD_SECONDS` (mặc định 90).
+- Nhân viên: tìm phòng, giữ chỗ, đặt, xem / hủy lịch của mình.
+- Quản trị: thêm các việc trên, cộng quản lý phòng.
+- Chỉ người tạo lịch (hoặc admin) mới sửa / hủy.
+- Không sửa hoặc hủy lịch đã bắt đầu.
 
-Dừng và xóa volume (reset seed):
+### Đề xuất phòng
 
-```bash
-docker compose down -v
-```
+Chỉ lấy phòng đang dùng, sức chứa ≥ số người, đủ tiện ích nếu có lọc.
 
-## Thiết kế
+Ba nhóm kết quả cùng khung giờ:
 
-Luồng chính: tìm phòng theo sĩ số → giữ chỗ mềm trên Redis → xác nhận booking → PostgreSQL chặn trùng giờ.
-
-```
-Client
-  → Controller
-  → Service
-  → Repository / Redis HoldStore
-  → PostgreSQL
-```
-
-Gói chính:
-
-- `Controller` — HTTP, bọc `APIResponse`
-- `Service` — luật nghiệp vụ
-- `Repository` — JPA / Redis
-- `Entity` — model DB
-- `DTO` — request / response
-- `Mapper` — MapStruct
-- `Exception` — `ErrorCode` + `AppException`
-- `Security` — JWT filter
-- `Seed` — user và phòng demo
-
-Mọi response cùng shape:
-
-```json
-{ "code": 1000, "message": "Success", "httpStatus": "OK", "result": {} }
-```
-
-`code = 1000` là thành công. Lỗi nghiệp vụ trả mã riêng (3xxx phòng, 4xxx booking) kèm HTTP status thật.
-
-### API
-
-| Method | Path | Việc |
-| --- | --- | --- |
-| POST | `/api/v1/auth/login` | Đăng nhập |
-| GET | `/api/v1/auth/me` | User hiện tại |
-| GET | `/api/v1/rooms/suggestions?attendeeCount=&startAt=&endAt=` | Đề xuất phòng |
-| GET | `/api/v1/rooms` | Danh sách phòng |
-| POST/PUT/DELETE | `/api/v1/rooms` | Admin quản lý phòng |
-| POST | `/api/v1/holds` | Giữ chỗ Redis |
-| POST | `/api/v1/holds/{id}/heartbeat` | Gia hạn giữ chỗ |
-| DELETE | `/api/v1/holds/{id}` | Nhả chỗ |
-| POST | `/api/v1/bookings` | Đặt phòng |
-| GET | `/api/v1/bookings/mine` | Lịch của tôi |
-| POST | `/api/v1/bookings/{id}/cancel` | Hủy lịch |
-| GET | `/api/v1/calendar?from=&to=` | Lịch tuần |
-
-### Luật đặt phòng
-
-- Mốc 15 phút, trong 07:00–21:00 (Asia/Ho_Chi_Minh)
-- Dài 15 phút–8 giờ, cùng một ngày
-- Không đặt quá khứ, không quá 30 ngày
-- Sĩ số không vượt sức chứa
-- Phòng `INACTIVE` không đặt được
-- Không sửa/xóa phòng khi còn lịch `CONFIRMED` chưa kết thúc
-
-### Fit khi đề xuất
-
-Chỉ xét phòng `ACTIVE`, đủ chỗ, đủ tiện ích. Xếp phòng ít dư chỗ lên trước.
-
-| Fit | Ý nghĩa |
+| Nhóm | Ý nghĩa |
 | --- | --- |
-| PERFECT / Vừa | Đúng sĩ số |
-| TIGHT / Tốt | Dư ít (≤ 2 chỗ hoặc ≤ 20%) |
-| GOOD / Ổn | Dư vừa |
-| SPACIOUS / Rộng | Dư nhiều |
+| Còn trống | Đặt được. Phòng ít dư chỗ đứng trước (6 người thấy phòng 6 trước phòng 16). |
+| Đang bị giữ | Người khác đang giữ Redis, hiện còn bao nhiêu giây. |
+| Đã có lịch | Đã có `CONFIRMED` chồng khung giờ. |
 
-Mỗi phòng còn gắn trạng thái khung giờ: `AVAILABLE`, `HELD_BY_ME`, `HELD_BY_OTHER`, `BOOKED`.
+Mức vừa chỗ: **Vừa** đúng sĩ số · **Tốt** dư ít · **Ổn** dư vừa · **Rộng** dư nhiều.
 
-## Quyết định quan trọng và lý do
+### Giữ chỗ
 
-Chỉ những quyết định gắn đề bài: đề xuất phòng theo sức chứa, giữ chỗ Redis, không trùng lịch, toàn vẹn dữ liệu đặt phòng.
+Bấm đặt là giữ phòng 90 giây trên Redis. Người khác thấy phòng đó “đang bị giữ”, không đặt được. Hết giờ hoặc hủy form thì nhả. Đặt xong thì hết hold. Một người chỉ giữ một phòng tại một thời điểm.
 
-**1. Tìm theo số người, không theo phòng**  
-Chọn: `GET /rooms/suggestions?attendeeCount=` rồi mới lọc phòng còn trống và đủ chỗ.  
-Lý do: đề bài là gợi ý phòng theo sức chứa. Nhu cầu là “6 người họp 9h cần phòng nào”, không phải lần lượt thử từng mã phòng. Xếp phòng ít dư chỗ lên trước để 3 người không chiếm phòng 16 chỗ.
+### Luật một lịch họp
 
-**2. Redis giữ chỗ mềm 90 giây**  
-Chọn: khi bấm đặt thì `SET` Redis TTL 90s; form còn mở thì heartbeat; hủy hoặc hết giờ thì nhả; đặt xong thì xóa hold.  
-Lý do: đề bài yêu cầu soft-hold. Hai người có thể mở cùng phòng trước khi ai xác nhận. Chỉ chặn lúc ghi booking thì người sau vẫn điền form rồi mới lỗi. Hold báo ngay phòng đang bị giữ và còn bao nhiêu giây.
+- Trong 07:00–21:00, theo giờ Việt Nam, cùng một ngày.
+- Bắt đầu / kết thúc khớp mốc 15 phút (09:00 được, 09:07 không).
+- Dài từ 15 phút đến 8 giờ; không đặt quá khứ; không đặt trước quá 30 ngày.
+- Số người không vượt sức chứa. Phòng ngưng dùng không đặt được.
+- Hai cuộc liền kề được: 09:00–10:00 và 10:00–11:00 không coi là chồng.
+- Hủy đổi thành `CANCELLED` — phòng trống lại, dòng lịch vẫn còn.
 
-**3. DB chặn hai lịch CONFIRMED chồng giờ**  
-Chọn: `EXCLUDE gist` trên khoảng `[start_at, end_at)`, chỉ với `CONFIRMED`, kèm khóa dòng phòng lúc insert.  
-Lý do: đề bài không cho hai cuộc họp cùng phòng cùng giờ. Redis có thể mất; hai request vẫn có thể insert cùng lúc. Constraint trên PostgreSQL là lớp cuối.  
-Khoảng nửa mở `[start, end)` để 09:00–10:00 và 10:00–11:00 không đụng nhau — họp liền kề vẫn được.
+### Phòng và toàn vẹn dữ liệu
 
-**4. Không sửa sức chứa / xóa phòng khi còn lịch họp**  
-Chọn: phòng có booking `CONFIRMED` mà `end_at > now` thì chỉ xem, không sửa, không xóa.  
-Lý do: lịch đã chốt 6 người trên phòng 6 chỗ. Đổi xuống 5 chỗ thì booking không còn đúng sức chứa. Đó là mất toàn vẹn dữ liệu đặt phòng.
+Phòng còn lịch `CONFIRMED` chưa kết thúc thì không sửa sức chứa và không xóa. Ví dụ đã chốt 6 người / 6 chỗ rồi hạ xuống 5 chỗ là sai dữ liệu.
 
-**5. Luật giờ họp: 07:00–21:00, mốc 15 phút, cùng ngày**  
-Chọn: timezone `Asia/Ho_Chi_Minh`, tối thiểu 15 phút, tối đa 8 giờ, đặt trước tối đa 30 ngày.  
-Lý do: tự thiết kế luật nghiệp vụ cho văn phòng. Slot 15 phút khớp lịch họp. Giới hạn giờ và ngày để không chiếm phòng ngoài giờ làm hoặc cả tháng.
+## Quyết định và lý do
 
-**6. Hủy lịch thì trả phòng, không xóa dòng**  
-Chọn: đổi `CANCELLED`; constraint overlap không tính lịch hủy.  
-Lý do: phòng phải trống lại cho người khác đặt. Xóa dòng thì mất dấu vết ai đã hủy cuộc họp đó.
+**Tìm theo số người.** Đề bài là gợi ý theo sức chứa: “6 người lúc 9h cần phòng nào”, không phải thử từng mã phòng.
+
+**Redis giữ 90s.** Hai người có thể mở cùng phòng trước khi ai xác nhận. Chỉ chặn lúc ghi DB thì người sau vẫn điền form rồi mới lỗi.
+
+**DB cấm hai lịch xác nhận chồng giờ.** Redis có thể mất; hai request vẫn có thể ghi cùng lúc. Constraint PostgreSQL là lớp cuối. Khoảng `[start, end)` để họp liền kề vẫn được.
+
+**Khóa sửa phòng khi còn họp.** Đổi 6 chỗ → 5 chỗ lúc đã có booking 6 người làm hỏng lịch đã chốt.
+
+**Giờ làm + mốc 15 phút.** Luật văn phòng tự đặt: trong giờ tòa nhà, khớp lịch họp, không chiếm phòng cả ngày / cả tháng.
+
+**Hủy thì trả phòng, không xóa dòng.** Người khác đặt được ngay; vẫn biết ai đã hủy cuộc họp đó.
