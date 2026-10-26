@@ -15,7 +15,7 @@ CREATE TABLE rooms (
     id              UUID PRIMARY KEY,
     code            VARCHAR(16)  NOT NULL UNIQUE,
     name            VARCHAR(120) NOT NULL,
-    floor           SMALLINT     NOT NULL,
+    floor           INTEGER      NOT NULL,
     location        VARCHAR(160) NOT NULL,
     capacity        INTEGER      NOT NULL CHECK (capacity > 0 AND capacity <= 200),
     description     VARCHAR(500),
