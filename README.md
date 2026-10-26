@@ -3,7 +3,6 @@
 REST API đặt phòng họp — DAOU KIWOOM.
 
 - Java 17 · Spring Boot 3 · PostgreSQL · Redis · Flyway
-- Cấu trúc giống Society: Controller / Service(Interface+Impl) / Repository / Entity / DTO / Mapper / Exception
 - Lombok + MapStruct
 
 ## Chạy local
