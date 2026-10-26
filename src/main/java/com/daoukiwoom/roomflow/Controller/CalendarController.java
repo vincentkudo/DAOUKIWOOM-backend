@@ -1,7 +1,7 @@
 package com.daoukiwoom.roomflow.Controller;
 
 import com.daoukiwoom.roomflow.DTO.Response.APIResponse;
-import com.daoukiwoom.roomflow.DTO.Response.BookingResponse;
+import com.daoukiwoom.roomflow.DTO.Response.CalendarPageResponse;
 import com.daoukiwoom.roomflow.Service.Interface.BookingService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -11,7 +11,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
-import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/calendar")
@@ -21,12 +20,17 @@ public class CalendarController {
     private BookingService bookingService;
 
     @GetMapping
-    public APIResponse<List<BookingResponse>> week(
+    public APIResponse<CalendarPageResponse> week(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
+            @RequestParam(required = false) Integer offset,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size
     ) {
-        APIResponse<List<BookingResponse>> apiResponse = new APIResponse<>();
-        apiResponse.setResult(bookingService.listRange(from, to));
+        int limit = size == null || size < 1 ? 20 : size;
+        int start = offset != null ? offset : (page == null ? 0 : page * limit);
+        APIResponse<CalendarPageResponse> apiResponse = new APIResponse<>();
+        apiResponse.setResult(bookingService.calendar(from, to, start, limit));
         return apiResponse;
     }
 }

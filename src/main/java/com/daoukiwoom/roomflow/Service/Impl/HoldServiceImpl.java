@@ -16,6 +16,7 @@ import com.daoukiwoom.roomflow.Repository.IRoomRepository;
 import com.daoukiwoom.roomflow.Security.AuthUser;
 import com.daoukiwoom.roomflow.Service.BookingRules;
 import com.daoukiwoom.roomflow.Service.Interface.HoldService;
+import com.daoukiwoom.roomflow.Service.Interface.SlotEventPublisher;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -41,6 +42,9 @@ public class HoldServiceImpl implements HoldService {
 
     @Autowired
     private AppClock appClock;
+
+    @Autowired
+    private SlotEventPublisher slotEvents;
 
     @Override
     public HoldSettingsResponse settings() {
@@ -68,7 +72,10 @@ public class HoldServiceImpl implements HoldService {
                 throw new AppException(ErrorCode.ROOM_HELD_BY_OTHER,
                         "Phòng đang được người khác giữ chỗ. Còn " + conflicting.remainingSeconds(now) + " giây.");
             }
-            holdStore.findByUser(actor.getId()).ifPresent(holdStore::delete);
+            holdStore.findByUser(actor.getId()).ifPresent(previous -> {
+                holdStore.delete(previous);
+                slotEvents.publish("RELEASED", previous.getRoomId(), previous.getStartAt(), previous.getEndAt());
+            });
 
             int ttl = holdProperties.getTtlSeconds();
             HoldRecord hold = new HoldRecord(
@@ -80,6 +87,7 @@ public class HoldServiceImpl implements HoldService {
                     now.plusSeconds(ttl)
             );
             holdStore.save(hold, Duration.ofSeconds(ttl));
+            slotEvents.publish("HELD", hold.getRoomId(), hold.getStartAt(), hold.getEndAt());
             return toResponse(hold, ttl, now);
         } finally {
             holdStore.unlockRoom(room.getId(), lockToken);
@@ -105,14 +113,19 @@ public class HoldServiceImpl implements HoldService {
 
     @Override
     public void release(UUID holdId, AuthUser actor) {
-        holdStore.delete(requireOwn(holdId, actor));
+        HoldRecord hold = requireOwn(holdId, actor);
+        holdStore.delete(hold);
+        slotEvents.publish("RELEASED", hold.getRoomId(), hold.getStartAt(), hold.getEndAt());
     }
 
     @Override
     public void consumeOwn(UUID userId, UUID roomId, Instant startAt, Instant endAt) {
         holdStore.findByUser(userId)
                 .filter(hold -> hold.getRoomId().equals(roomId) && hold.overlaps(startAt, endAt))
-                .ifPresent(holdStore::delete);
+                .ifPresent(hold -> {
+                    holdStore.delete(hold);
+                    slotEvents.publish("RELEASED", hold.getRoomId(), hold.getStartAt(), hold.getEndAt());
+                });
     }
 
     @Override

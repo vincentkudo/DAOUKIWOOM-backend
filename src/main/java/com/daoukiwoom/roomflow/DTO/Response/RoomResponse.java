@@ -24,4 +24,5 @@ public class RoomResponse {
     private String description;
     private RoomStatus status;
     private Set<Amenity> amenities;
+    private boolean locked;
 }

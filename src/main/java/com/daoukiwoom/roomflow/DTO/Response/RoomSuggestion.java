@@ -8,7 +8,10 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import com.daoukiwoom.roomflow.Entity.Amenity;
+
 import java.time.Instant;
+import java.util.List;
 
 @Getter
 @Setter
@@ -24,4 +27,5 @@ public class RoomSuggestion {
     private String fitLabel;
     private Instant holdExpiresAt;
     private int holdRemainingSeconds;
+    private List<Amenity> missingAmenities;
 }

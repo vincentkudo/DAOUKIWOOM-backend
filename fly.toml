@@ -1,0 +1,35 @@
+app = "roomflow-dkw-api"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  SPRING_PROFILES_ACTIVE = "prod"
+  SERVER_PORT = "8080"
+  SEED_ENABLED = "true"
+  APP_TIMEZONE = "Asia/Ho_Chi_Minh"
+  JWT_EXPIRATION_MINUTES = "480"
+  ROOM_HOLD_SECONDS = "90"
+  CORS_ORIGINS = "https://roomflow-dkw-web.fly.dev"
+  REDIS_SSL = "false"
+  REDIS_PORT = "6379"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "20s"
+    timeout = "8s"
+    grace_period = "180s"
+    method = "GET"
+    path = "/actuator/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1024mb"

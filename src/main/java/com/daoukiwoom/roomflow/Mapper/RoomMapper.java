@@ -9,6 +9,7 @@ import org.mapstruct.MappingTarget;
 
 @Mapper(componentModel = "spring")
 public interface RoomMapper {
+    @Mapping(target = "locked", ignore = true)
     RoomResponse toRoomResponse(Room room);
 
     @Mapping(target = "id", ignore = true)

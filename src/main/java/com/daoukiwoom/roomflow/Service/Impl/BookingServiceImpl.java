@@ -4,6 +4,9 @@ import com.daoukiwoom.roomflow.Config.AppClock;
 import com.daoukiwoom.roomflow.DTO.Request.CancelBookingRequest;
 import com.daoukiwoom.roomflow.DTO.Request.CreateBookingRequest;
 import com.daoukiwoom.roomflow.DTO.Response.BookingResponse;
+import com.daoukiwoom.roomflow.DTO.Response.CalendarPageResponse;
+import com.daoukiwoom.roomflow.DTO.Response.PageResponse;
+import com.daoukiwoom.roomflow.DTO.Response.RoomResponse;
 import com.daoukiwoom.roomflow.Entity.Booking;
 import com.daoukiwoom.roomflow.Entity.BookingStatus;
 import com.daoukiwoom.roomflow.Entity.Room;
@@ -12,6 +15,7 @@ import com.daoukiwoom.roomflow.Entity.User;
 import com.daoukiwoom.roomflow.Exception.AppException;
 import com.daoukiwoom.roomflow.Exception.ErrorCode;
 import com.daoukiwoom.roomflow.Mapper.BookingMapper;
+import com.daoukiwoom.roomflow.Mapper.RoomMapper;
 import com.daoukiwoom.roomflow.Repository.IBookingRepository;
 import com.daoukiwoom.roomflow.Repository.IRoomRepository;
 import com.daoukiwoom.roomflow.Repository.IUserRepository;
@@ -19,10 +23,15 @@ import com.daoukiwoom.roomflow.Security.AuthUser;
 import com.daoukiwoom.roomflow.Service.BookingRules;
 import com.daoukiwoom.roomflow.Service.Interface.BookingService;
 import com.daoukiwoom.roomflow.Service.Interface.HoldService;
+import com.daoukiwoom.roomflow.Service.Interface.SlotEventPublisher;
+import com.daoukiwoom.roomflow.Service.OffsetLimit;
+import com.daoukiwoom.roomflow.Service.PageLimits;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
@@ -48,7 +57,13 @@ public class BookingServiceImpl implements BookingService {
     private BookingMapper bookingMapper;
 
     @Autowired
+    private RoomMapper roomMapper;
+
+    @Autowired
     private AppClock appClock;
+
+    @Autowired
+    private SlotEventPublisher slotEvents;
 
     @Override
     @Transactional
@@ -80,6 +95,7 @@ public class BookingServiceImpl implements BookingService {
                 .build();
         BookingResponse response = bookingMapper.toBookingResponse(bookingRepository.save(booking));
         holdService.consumeOwn(actor.getId(), room.getId(), request.getStartAt(), request.getEndAt());
+        slotEvents.publish("BOOKED", room.getId(), request.getStartAt(), request.getEndAt());
         return response;
     }
 
@@ -105,6 +121,7 @@ public class BookingServiceImpl implements BookingService {
         booking.setAttendeeCount(request.getAttendeeCount());
         booking.setAttendeeIds(sanitizeAttendees(request.getAttendeeIds(), booking.getOrganizer().getId()));
         booking.setUpdatedAt(Instant.now());
+        slotEvents.publish("BOOKED", room.getId(), request.getStartAt(), request.getEndAt());
         return bookingMapper.toBookingResponse(booking);
     }
 
@@ -118,6 +135,7 @@ public class BookingServiceImpl implements BookingService {
         }
         assertNotStarted(booking);
         booking.cancel(trimToNull(request == null ? null : request.getReason()), appClock.now());
+        slotEvents.publish("FREED", booking.getRoom().getId(), booking.getStartAt(), booking.getEndAt());
         return bookingMapper.toBookingResponse(booking);
     }
 
@@ -133,18 +151,55 @@ public class BookingServiceImpl implements BookingService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<BookingResponse> listMine(AuthUser actor) {
-        return bookingRepository.findByOrganizerId(actor.getId()).stream()
-                .map(bookingMapper::toBookingResponse)
-                .toList();
+    public PageResponse<BookingResponse> listMine(AuthUser actor, Integer page, Integer size) {
+        Page<Booking> bookings = bookingRepository.findByOrganizer_IdOrderByStartAtDesc(
+                actor.getId(),
+                PageLimits.of(page, size, PageLimits.BOOKINGS)
+        );
+        return PageResponse.of(bookings.map(bookingMapper::toBookingResponse));
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<BookingResponse> listRange(Instant from, Instant to) {
-        return bookingRepository.findOverlappingRange(from, to).stream()
-                .map(bookingMapper::toBookingResponse)
+    public PageResponse<BookingResponse> listRange(Instant from, Instant to, Integer page, Integer size) {
+        assertListRange(from, to);
+        Page<Booking> bookings = bookingRepository.findByStartAtLessThanAndEndAtGreaterThanOrderByStartAtAsc(
+                to,
+                from,
+                PageLimits.of(page, size, PageLimits.BOOKINGS)
+        );
+        return PageResponse.of(bookings.map(bookingMapper::toBookingResponse));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public CalendarPageResponse calendar(Instant from, Instant to, Integer offset, Integer size) {
+        assertListRange(from, to);
+        int limit = PageLimits.of(0, size, 20).getPageSize();
+        int start = offset == null || offset < 0 ? 0 : offset;
+        Page<Room> rooms = roomRepository.findByStatusOrderByFloorAscCapacityAscCodeAsc(
+                RoomStatus.ACTIVE,
+                new OffsetLimit(start, limit)
+        );
+        List<UUID> roomIds = rooms.getContent().stream().map(Room::getId).toList();
+        List<BookingResponse> bookings = roomIds.isEmpty()
+                ? List.of()
+                : bookingRepository.findOverlappingRangeForRooms(from, to, roomIds).stream()
+                        .map(bookingMapper::toBookingResponse)
+                        .toList();
+        List<RoomResponse> roomItems = rooms.getContent().stream()
+                .map(roomMapper::toRoomResponse)
                 .toList();
+        return new CalendarPageResponse(PageResponse.of(roomItems, rooms), bookings);
+    }
+
+    private void assertListRange(Instant from, Instant to) {
+        if (from == null || to == null || !from.isBefore(to)) {
+            throw new AppException(ErrorCode.INVALID_TIME_RANGE);
+        }
+        if (Duration.between(from, to).compareTo(Duration.ofDays(PageLimits.RANGE_DAYS)) > 0) {
+            throw new AppException(ErrorCode.RANGE_TOO_WIDE);
+        }
     }
 
     private Booking require(UUID id) {

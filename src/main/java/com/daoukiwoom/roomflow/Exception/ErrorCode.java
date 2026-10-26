@@ -16,6 +16,7 @@ public enum ErrorCode {
 
     VALIDATION_FAILED(2000, "Dữ liệu gửi lên không hợp lệ.", HttpStatus.BAD_REQUEST),
     INVALID_TIME_RANGE(2001, "Khung giờ đặt phòng không hợp lệ.", HttpStatus.BAD_REQUEST),
+    RANGE_TOO_WIDE(2008, "Chỉ xem lịch tối đa 7 ngày một lần.", HttpStatus.BAD_REQUEST),
     OUTSIDE_WORKING_HOURS(2002, "Chỉ được đặt phòng trong giờ làm việc 07:00–21:00.", HttpStatus.BAD_REQUEST),
     SLOT_NOT_ALIGNED(2003, "Thời gian phải khớp mốc 15 phút.", HttpStatus.BAD_REQUEST),
     BOOKING_TOO_SHORT(2004, "Thời lượng tối thiểu là 15 phút.", HttpStatus.BAD_REQUEST),
@@ -26,6 +27,7 @@ public enum ErrorCode {
     ROOM_NOT_FOUND(3001, "Không tìm thấy phòng họp.", HttpStatus.NOT_FOUND),
     ROOM_INACTIVE(3002, "Phòng họp đang ngưng sử dụng.", HttpStatus.CONFLICT),
     ROOM_CODE_EXISTS(3003, "Mã phòng đã tồn tại.", HttpStatus.CONFLICT),
+    ROOM_HAS_ACTIVE_BOOKINGS(3010, "Phòng đang có lịch họp. Không thể sửa hoặc xóa để giữ toàn vẹn dữ liệu.", HttpStatus.CONFLICT),
     ROOM_CAPACITY_EXCEEDED(3004, "Số người vượt quá sức chứa của phòng.", HttpStatus.CONFLICT),
     ROOM_ALREADY_BOOKED(3005, "Phòng đã được đặt trong khung giờ này.", HttpStatus.CONFLICT),
     ROOM_HELD_BY_OTHER(3006, "Phòng đang được người khác giữ chỗ.", HttpStatus.CONFLICT),

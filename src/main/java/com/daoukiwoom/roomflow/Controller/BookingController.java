@@ -4,6 +4,7 @@ import com.daoukiwoom.roomflow.DTO.Request.CancelBookingRequest;
 import com.daoukiwoom.roomflow.DTO.Request.CreateBookingRequest;
 import com.daoukiwoom.roomflow.DTO.Response.APIResponse;
 import com.daoukiwoom.roomflow.DTO.Response.BookingResponse;
+import com.daoukiwoom.roomflow.DTO.Response.PageResponse;
 import com.daoukiwoom.roomflow.Security.AuthUser;
 import com.daoukiwoom.roomflow.Service.Interface.BookingService;
 import jakarta.validation.Valid;
@@ -20,7 +21,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -31,19 +31,25 @@ public class BookingController {
     private BookingService bookingService;
 
     @GetMapping("/mine")
-    public APIResponse<List<BookingResponse>> mine(@AuthenticationPrincipal AuthUser actor) {
-        APIResponse<List<BookingResponse>> apiResponse = new APIResponse<>();
-        apiResponse.setResult(bookingService.listMine(actor));
+    public APIResponse<PageResponse<BookingResponse>> mine(
+            @AuthenticationPrincipal AuthUser actor,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size
+    ) {
+        APIResponse<PageResponse<BookingResponse>> apiResponse = new APIResponse<>();
+        apiResponse.setResult(bookingService.listMine(actor, page, size));
         return apiResponse;
     }
 
     @GetMapping
-    public APIResponse<List<BookingResponse>> range(
+    public APIResponse<PageResponse<BookingResponse>> range(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size
     ) {
-        APIResponse<List<BookingResponse>> apiResponse = new APIResponse<>();
-        apiResponse.setResult(bookingService.listRange(from, to));
+        APIResponse<PageResponse<BookingResponse>> apiResponse = new APIResponse<>();
+        apiResponse.setResult(bookingService.listRange(from, to, page, size));
         return apiResponse;
     }
 

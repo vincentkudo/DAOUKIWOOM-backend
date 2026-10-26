@@ -29,12 +29,12 @@ public final class RoomFitScorer {
         return (capacity - attendeeCount) * 100 + capacity;
     }
 
-    public static String label(FitLevel level, int capacity, int attendeeCount) {
+    public static String label(FitLevel level) {
         return switch (level) {
-            case PERFECT -> "Vừa khít " + attendeeCount + "/" + capacity + " người";
-            case TIGHT -> "Phù hợp — sức chứa " + capacity + " người";
-            case GOOD -> "Ổn — phòng " + capacity + " người (bạn cần " + attendeeCount + ")";
-            case SPACIOUS -> "Rộng hơn nhu cầu — " + capacity + " chỗ, bạn cần " + attendeeCount;
+            case PERFECT -> "Vừa";
+            case TIGHT -> "Tốt";
+            case GOOD -> "Ổn";
+            case SPACIOUS -> "Rộng";
         };
     }
 }

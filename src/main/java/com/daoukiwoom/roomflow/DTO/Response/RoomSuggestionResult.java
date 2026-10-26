@@ -17,4 +17,8 @@ public class RoomSuggestionResult {
     private List<RoomSuggestion> recommended;
     private List<RoomSuggestion> held;
     private List<RoomSuggestion> occupied;
+    private int page;
+    private int totalPages;
+    private boolean hasMore;
+    private boolean amenityFallback;
 }
