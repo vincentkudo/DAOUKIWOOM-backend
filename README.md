@@ -36,9 +36,11 @@ Còn lịch `CONFIRMED` chưa kết thúc — đang họp **và lịch tương l
 
 **Redis giữ 90s.** Hai người có thể mở cùng phòng trước khi ai xác nhận. Chỉ chặn lúc ghi DB thì người sau vẫn điền form rồi mới lỗi.
 
-**Đẩy sự kiện khi giữ / đặt / hủy.** Nhiều người cùng tìm một khung giờ: ai giữ hoặc đặt thì những người đang xem khung đó phải thấy ngay, không F5, không đợi hết 90s rồi mới biết phòng hết. Server bắn cho mọi tab đang mở; tab xem giờ khác bỏ qua. Mất kết nối thì tải lại mỗi 4 giây. Redis + constraint DB vẫn là lớp chặn — UI tươi chỉ để khỏi bấm nhầm.
+**WebSocket khi giữ / đặt / hủy.** Nhiều người cùng tìm một khung giờ: ai giữ hoặc đặt thì những người đang xem khung đó phải thấy ngay, không F5, không đợi hết 90s rồi mới biết phòng hết. Server bắn socket `/ws/slots` (`HELD` / `RELEASED` / `BOOKED` / `FREED`) cho mọi tab đang mở; tab xem giờ khác bỏ qua. Mất socket thì tải lại mỗi 4 giây. Redis + constraint DB vẫn là lớp chặn — UI tươi chỉ để khỏi bấm nhầm.
 
 **List có trang, xem tiếp thì gọi API tiếp.** Phòng / lịch / đề xuất không trả cả bảng. Lịch tuần tối đa 7 ngày, mỗi lần một trang phòng. 10 phòng thì nhẹ; hàng chục nghìn phòng không kéo một request là nổ.
+
+**Khi dữ liệu lớn — đề bài vài chục phòng, thực tế là nhiều tầng / nhiều năm lịch.** Bottleneck không phải “thêm RAM”. Đề xuất không được `SELECT` hết phòng rồi lọc trong app: lọc `ACTIVE` + `capacity >= n` + chưa chồng giờ trên DB (index sức chứa + cấm chồng giờ theo từng phòng), tiện ích là điều kiện phụ. Lịch tuần không vẽ cả tòa: người dùng tìm / lọc phòng trước, API chỉ lấy một trang phòng trong tối đa 7 ngày — đúng hướng đang làm, scale thì giữ vậy chứ bỏ trang. Socket không broadcast mọi `HELD`/`BOOKED` cho mọi tab mãi được; thực tế subscribe theo khung giờ hoặc tầng, tab chỉ nhận slot mình đang xem. Mất socket vẫn poll 4s. Redis hold 90s và exclude DB **không thay**: UI tươi chỉ để khỏi bấm nhầm, hai request cùng lúc vẫn thua constraint. Bảng nóng chỉ lịch còn hiệu lực; `CANCELLED` cũ archive theo năm để kiểm tra chồng giờ khỏi phình. Nhiều cơ sở thì tách dữ liệu theo tòa: phòng Hà Nội không cần so giờ với phòng HCM.
 
 **DB cấm hai lịch xác nhận chồng giờ.** Redis có thể mất; hai request vẫn có thể ghi cùng lúc. Constraint PostgreSQL là lớp cuối. Khoảng `[start, end)` để họp liền kề vẫn được.
 
